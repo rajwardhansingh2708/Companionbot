@@ -19,6 +19,10 @@ VECTORIZER_FILE = os.path.join(BASE_DIR, "vectorizer.pkl")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "companionbot")
 
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3")
+
+
 client = MongoClient(MONGO_URI)
 db = client[MONGO_DB]
 users_collection = db["users"]
@@ -178,9 +182,9 @@ def generate_reply(message, emotion, history=None):
 
     try:
         response = requests.post(
-            "http://127.0.0.1:11434/api/generate",
-            json={
-                "model": "phi3",
+    OLLAMA_URL,
+    json={
+        "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
@@ -389,4 +393,6 @@ def delete_chat(chat_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
+
