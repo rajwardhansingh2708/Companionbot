@@ -222,6 +222,8 @@ def signup():
         password = data.get("password", "").strip()
         support_focus = data.get("support_focus", "stress")
 
+        print("Signup attempt:", username)
+
         if not username or not password:
             return jsonify({"error": "Required fields missing"}), 400
 
@@ -236,7 +238,7 @@ def signup():
 
         return jsonify({"message": "Signup successful", "username": username})
     except Exception as e:
-        print("Signup error:", e)
+        print("Signup error:", repr(e))
         return jsonify({"error": "Signup failed on server"}), 500
 
 
@@ -247,28 +249,7 @@ def login():
         username = data.get("username", "").strip()
         password = data.get("password", "").strip()
 
-        user = users_collection.find_one({
-            "username": username,
-            "password": password
-        })
-
-        if not user:
-            return jsonify({"error": "Invalid credentials"}), 401
-
-        return jsonify({"message": "Login successful", "username": username})
-    except Exception as e:
-        print("Login error:", e)
-        return jsonify({"error": "Login failed on server"}), 500
-
-
-
-
-@app.route("/login", methods=["POST"])
-def login():
-    try:
-        data = request.get_json()
-        username = data.get("username", "").strip()
-        password = data.get("password", "").strip()
+        print("Login attempt:", username)
 
         user = users_collection.find_one({
             "username": username,
@@ -280,8 +261,9 @@ def login():
 
         return jsonify({"message": "Login successful", "username": username})
     except Exception as e:
-        print("Login error:", e)
+        print("Login error:", repr(e))
         return jsonify({"error": "Login failed on server"}), 500
+
 
 
 
