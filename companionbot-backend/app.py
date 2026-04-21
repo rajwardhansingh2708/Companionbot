@@ -240,6 +240,28 @@ def signup():
         return jsonify({"error": "Signup failed on server"}), 500
 
 
+@app.route("/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+
+        user = users_collection.find_one({
+            "username": username,
+            "password": password
+        })
+
+        if not user:
+            return jsonify({"error": "Invalid credentials"}), 401
+
+        return jsonify({"message": "Login successful", "username": username})
+    except Exception as e:
+        print("Login error:", e)
+        return jsonify({"error": "Login failed on server"}), 500
+
+
+
 
 @app.route("/login", methods=["POST"])
 def login():
