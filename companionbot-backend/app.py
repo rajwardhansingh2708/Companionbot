@@ -216,41 +216,51 @@ def home():
 
 @app.route("/signup", methods=["POST"])
 def signup():
-    data = request.get_json()
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    support_focus = data.get("support_focus", "stress")
+    try:
+        data = request.get_json()
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+        support_focus = data.get("support_focus", "stress")
 
-    if not username or not password:
-        return jsonify({"error": "Required fields missing"}), 400
+        if not username or not password:
+            return jsonify({"error": "Required fields missing"}), 400
 
-    if users_collection.find_one({"username": username}):
-        return jsonify({"error": "User exists"}), 400
+        if users_collection.find_one({"username": username}):
+            return jsonify({"error": "User exists"}), 400
 
-    users_collection.insert_one({
-        "username": username,
-        "password": password,
-        "support_focus": support_focus
-    })
+        users_collection.insert_one({
+            "username": username,
+            "password": password,
+            "support_focus": support_focus
+        })
 
-    return jsonify({"message": "Signup successful", "username": username})
+        return jsonify({"message": "Signup successful", "username": username})
+    except Exception as e:
+        print("Signup error:", e)
+        return jsonify({"error": "Signup failed on server"}), 500
+
 
 
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
+    try:
+        data = request.get_json()
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
 
-    user = users_collection.find_one({
-        "username": username,
-        "password": password
-    })
+        user = users_collection.find_one({
+            "username": username,
+            "password": password
+        })
 
-    if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
+        if not user:
+            return jsonify({"error": "Invalid credentials"}), 401
 
-    return jsonify({"message": "Login successful", "username": username})
+        return jsonify({"message": "Login successful", "username": username})
+    except Exception as e:
+        print("Login error:", e)
+        return jsonify({"error": "Login failed on server"}), 500
+
 
 
 @app.route("/chat", methods=["POST"])
