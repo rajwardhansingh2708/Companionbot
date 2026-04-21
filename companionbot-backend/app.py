@@ -19,9 +19,9 @@ VECTORIZER_FILE = os.path.join(BASE_DIR, "vectorizer.pkl")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "companionbot")
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3")
-
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 client = MongoClient(MONGO_URI)
 db = client[MONGO_DB]
@@ -48,28 +48,24 @@ def improve_chat_title(messages, emotion):
     combined = " ".join(user_messages[-3:]).lower()
 
     if emotion == "sad":
-        if "lonely" in combined or "alone" in combined:
+        if any(word in combined for word in ["lonely", "alone"]):
             return "Feeling lonely and alone"
-        if "friend" in combined or "friends" in combined:
+        if any(word in combined for word in ["friend", "friends"]):
             return "Feeling left out by friends"
-        return "Feeling emotionally low"
+        return "Feeling low and emotional"
 
     if emotion == "stress":
-        if "exam" in combined or "study" in combined:
+        if any(word in combined for word in ["exam", "study", "assignment"]):
             return "Stress about studies"
-        if "work" in combined or "pressure" in combined:
-            return "Feeling under pressure"
         return "Managing stress"
 
     if emotion == "anxiety":
-        if "future" in combined:
+        if any(word in combined for word in ["future", "career"]):
             return "Worried about the future"
-        if "panic" in combined or "fear" in combined:
-            return "Dealing with anxious thoughts"
         return "Feeling anxious"
 
     if emotion == "happy":
-        return "Sharing a positive moment"
+        return "Positive moment"
 
     return create_chat_title(user_messages[0])
 
@@ -77,16 +73,15 @@ def improve_chat_title(messages, emotion):
 def fallback_emotion(text):
     text = text.lower()
 
-    if "sad" in text or "alone" in text or "lonely" in text:
+    if any(word in text for word in ["sad", "alone", "lonely"]):
         return "sad", "85%"
-    elif "stress" in text or "pressure" in text or "overwhelmed" in text or "tired" in text or "exhausted" in text:
+    if any(word in text for word in ["stress", "pressure", "tired", "overwhelmed", "exhausted"]):
         return "stress", "85%"
-    elif "anxious" in text or "fear" in text or "panic" in text or "worried" in text:
+    if any(word in text for word in ["anxious", "fear", "panic", "nervous", "worried"]):
         return "anxiety", "85%"
-    elif "happy" in text or "good" in text or "great" in text:
+    if any(word in text for word in ["happy", "good", "great"]):
         return "happy", "85%"
-    else:
-        return "neutral", "70%"
+    return "neutral", "70%"
 
 
 def predict_emotion_local(text):
@@ -97,8 +92,7 @@ def predict_emotion_local(text):
 
 def hybrid_emotion(text):
     try:
-        local_emotion, local_conf = predict_emotion_local(text)
-        return local_emotion, local_conf
+        return predict_emotion_local(text)
     except Exception:
         return fallback_emotion(text)
 
@@ -106,119 +100,111 @@ def hybrid_emotion(text):
 def normalize_emotion(emotion, message):
     msg = message.lower()
 
-    if any(word in msg for word in ["tired", "stress", "stressed", "overwhelmed", "pressure", "burnout", "exhausted"]):
+    if any(w in msg for w in ["tired", "stress", "pressure", "overwhelmed", "burnout", "exhausted"]):
         return "stress"
-
-    if any(word in msg for word in ["anxious", "panic", "worried", "nervous", "fear"]):
+    if any(w in msg for w in ["anxious", "nervous", "fear", "panic", "worried"]):
         return "anxiety"
-
-    if any(word in msg for word in ["alone", "lonely", "empty", "hurt", "sad", "crying"]):
+    if any(w in msg for w in ["alone", "lonely", "sad", "hurt", "empty"]):
         return "sad"
-
-    if any(word in msg for word in ["happy", "good", "great", "better", "relaxed", "calm"]):
+    if any(w in msg for w in ["happy", "good", "great", "better"]):
         return "happy"
 
     if emotion in ["sadness", "sad"]:
         return "sad"
-    elif emotion in ["joy", "happy"]:
+    if emotion in ["joy", "happy"]:
         return "happy"
-    elif emotion in ["fear", "anxiety"]:
+    if emotion in ["fear", "anxiety"]:
         return "anxiety"
-    elif emotion in ["anger", "stress"]:
+    if emotion in ["anger", "stress"]:
         return "stress"
 
     return "neutral"
 
 
-def build_ollama_prompt(message, emotion, history):
-    history_lines = []
-    for item in history[-6:]:
-        role = "User" if item["sender"] == "user" else "Assistant"
-        history_lines.append(f"{role}: {item['text']}")
-
-    history_text = "\n".join(history_lines)
-
-    return f"""
-You are CompanionBot, a supportive mental health chatbot for students.
-
-Style rules:
-- Be warm, calm, and natural.
-- Sound like a supportive friend, not a therapist, article, or poet.
-- Keep replies short: maximum 2 or 3 sentences.
-- Use simple everyday English.
-- Do not be overly dramatic or overly creative.
-- Do not give long explanations.
-- Do not mention being an AI or any company.
-- Do not apologize unless clearly necessary.
-- First acknowledge the feeling briefly.
-- Then ask one relevant follow-up question OR give one small practical suggestion.
-- Focus on emotional support, not general knowledge.
-
-Current detected emotion: {emotion}
-
-Conversation so far:
-{history_text}
-
-User: {message}
-Assistant:
-""".strip()
-
-
 def fallback_reply(emotion):
     if emotion == "sad":
-        return "That sounds heavy. I am glad you shared it. Do you want to tell me a little more about what happened?"
+        return "I'm really sorry you're feeling this way. Want to share what's been bothering you?"
     if emotion == "stress":
-        return "It sounds like you are carrying a lot right now. What feels like the most stressful part?"
+        return "That sounds stressful. What's putting the most pressure on you right now?"
     if emotion == "anxiety":
-        return "That sounds overwhelming. Let us slow it down together. What is the main worry on your mind right now?"
+        return "That sounds overwhelming. Let's take it one step at a time. What's worrying you most?"
     if emotion == "happy":
-        return "That is good to hear. What has been helping you feel this way?"
-    return "I am here with you. Tell me a little more so I can understand better."
+        return "That's great to hear! What made you feel this way?"
+    return "I'm here with you. Tell me more about how you're feeling."
 
 
 def generate_reply(message, emotion, history=None):
     history = history or []
-    prompt = build_ollama_prompt(message, emotion, history)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are CompanionBot, a supportive mental health chatbot for students. "
+                "Be warm, calm, natural, and concise. "
+                "Keep replies natural and engaging, 2 to 4 sentences max. "
+                "Use simple everyday English. "
+                "Do not mention being an AI. "
+                "First acknowledge the feeling briefly, then ask one helpful follow-up question "
+                "or suggest one small practical next step."
+            )
+        }
+    ]
+
+    for item in history[-6:]:
+        role = "user" if item["sender"] == "user" else "assistant"
+        messages.append({
+            "role": role,
+            "content": item["text"]
+        })
+
+    messages.append({
+        "role": "user",
+        "content": f"Detected emotion: {emotion}\nUser message: {message}"
+    })
+
+    if not HF_TOKEN:
+        return fallback_reply(emotion)
 
     try:
         response = requests.post(
-    OLLAMA_URL,
-    json={
-        "model": OLLAMA_MODEL,
-                "prompt": prompt,
+            HF_API_URL,
+            headers={
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": HF_MODEL,
+                "messages": messages,
                 "stream": False,
-                "options": {
-                    "temperature": 0.6,
-                    "top_p": 0.9
-                }
+                "temperature": 0.6,
+                "max_tokens": 150
             },
             timeout=60
         )
 
         if response.status_code != 200:
+            print("HF ERROR:", response.text)
             return fallback_reply(emotion)
 
         data = response.json()
-        reply = data.get("response", "").strip()
+        reply = data["choices"][0]["message"]["content"].strip()
 
-        if not reply:
-            return fallback_reply(emotion)
+        return reply if reply else fallback_reply(emotion)
 
-        return reply
-
-    except Exception:
+    except Exception as e:
+        print("HF Exception:", e)
         return fallback_reply(emotion)
 
 
 def recommend_activity(emotion):
     activity_map = {
-        "sad": ["Grounding Activity", "Journaling Prompt", "Comfort Reflection"],
+        "sad": ["Grounding Activity", "Comfort Reflection", "Journaling Prompt"],
         "stress": ["Breathing Exercise", "Focus Reset", "Micro Break Routine"],
-        "anxiety": ["Calming Activity", "Grounding Activity", "Breathing Exercise"],
+        "anxiety": ["Calming Activity", "Breathing Exercise", "Grounding Activity"],
         "happy": ["Gratitude Reflection", "Positive Journaling"],
-        "neutral": ["Breathing Exercise"]
+        "neutral": ["Breathing Exercise", "Grounding Activity"]
     }
-
     activities = activity_map.get(emotion, ["Breathing Exercise"])
     return activities[0], activities
 
@@ -236,11 +222,10 @@ def signup():
     support_focus = data.get("support_focus", "stress")
 
     if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
+        return jsonify({"error": "Required fields missing"}), 400
 
-    existing_user = users_collection.find_one({"username": username})
-    if existing_user:
-        return jsonify({"error": "Username already exists"}), 400
+    if users_collection.find_one({"username": username}):
+        return jsonify({"error": "User exists"}), 400
 
     users_collection.insert_one({
         "username": username,
@@ -248,10 +233,7 @@ def signup():
         "support_focus": support_focus
     })
 
-    return jsonify({
-        "message": "Signup successful",
-        "username": username
-    })
+    return jsonify({"message": "Signup successful", "username": username})
 
 
 @app.route("/login", methods=["POST"])
@@ -266,12 +248,9 @@ def login():
     })
 
     if not user:
-        return jsonify({"error": "Invalid username or password"}), 401
+        return jsonify({"error": "Invalid credentials"}), 401
 
-    return jsonify({
-        "message": "Login successful",
-        "username": username
-    })
+    return jsonify({"message": "Login successful", "username": username})
 
 
 @app.route("/chat", methods=["POST"])
@@ -280,54 +259,47 @@ def chat():
 
     username = data.get("username", "").strip()
     message = data.get("message", "").strip()
-    chat_id = data.get("chat_id", "").strip()
+    chat_id = data.get("chat_id") or str(uuid.uuid4())
 
     if not username or not message:
         return jsonify({"error": "Username and message are required"}), 400
-
-    if not chat_id:
-        chat_id = str(uuid.uuid4())
 
     existing_chat = chats_collection.find_one({
         "chat_id": chat_id,
         "username": username
     })
 
-    conversation_history = existing_chat["messages"] if existing_chat else []
+    history = existing_chat["messages"] if existing_chat else []
 
     raw_emotion, confidence = hybrid_emotion(message)
     emotion = normalize_emotion(raw_emotion, message)
 
-    reply = generate_reply(message, emotion, conversation_history)
-
+    reply = generate_reply(message, emotion, history)
     game_type, recommended_activities = recommend_activity(emotion)
-    suggest_game = True if recommended_activities else False
+    suggest_game = True
 
     if existing_chat:
         updated_messages = existing_chat["messages"] + [
             {"sender": "user", "text": message},
             {"sender": "bot", "text": reply}
         ]
-
-        user_turns = len([m for m in updated_messages if m["sender"] == "user"])
-        updated_title = existing_chat["title"]
+        user_turns = len([item for item in updated_messages if item["sender"] == "user"])
+        title = existing_chat.get("title", create_chat_title(message))
 
         if user_turns >= 3:
-            updated_title = improve_chat_title(updated_messages, emotion)
+            title = improve_chat_title(updated_messages, emotion)
 
         chats_collection.update_one(
             {"chat_id": chat_id, "username": username},
-            {
-                "$set": {
-                    "messages": updated_messages,
-                    "emotion": emotion,
-                    "confidence": confidence,
-                    "suggest_game": suggest_game,
-                    "game_type": game_type,
-                    "recommended_activities": recommended_activities,
-                    "title": updated_title
-                }
-            }
+            {"$set": {
+                "messages": updated_messages,
+                "title": title,
+                "emotion": emotion,
+                "confidence": confidence,
+                "suggest_game": suggest_game,
+                "game_type": game_type,
+                "recommended_activities": recommended_activities
+            }}
         )
     else:
         chats_collection.insert_one({
@@ -339,6 +311,7 @@ def chat():
             "suggest_game": suggest_game,
             "game_type": game_type,
             "recommended_activities": recommended_activities,
+            "pinned": False,
             "messages": [
                 {"sender": "user", "text": message},
                 {"sender": "bot", "text": reply}
@@ -352,7 +325,8 @@ def chat():
         "confidence": confidence,
         "suggest_game": suggest_game,
         "game_type": game_type,
-        "recommended_activities": recommended_activities
+        "recommended_activities": recommended_activities,
+        "open_activity": False
     })
 
 
@@ -364,8 +338,9 @@ def history(username):
     for chat in user_chats:
         formatted.append({
             "chat_id": chat["chat_id"],
-            "title": chat["title"],
-            "emotion": chat.get("emotion", "neutral")
+            "title": chat.get("title", "New conversation"),
+            "emotion": chat.get("emotion", "neutral"),
+            "pinned": chat.get("pinned", False)
         })
 
     return jsonify(formatted)
@@ -392,8 +367,22 @@ def delete_chat(chat_id):
     return jsonify({"message": "Chat deleted successfully"})
 
 
+@app.route("/history/chat/<chat_id>/pin", methods=["PATCH"])
+def toggle_pin(chat_id):
+    data = request.get_json(silent=True) or {}
+    pinned = bool(data.get("pinned", False))
+
+    result = chats_collection.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"pinned": pinned}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "Chat not found"}), 404
+
+    return jsonify({"message": "Pin updated", "pinned": pinned})
+
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
-
-
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

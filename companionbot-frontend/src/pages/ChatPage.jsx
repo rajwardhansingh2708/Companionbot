@@ -5,7 +5,12 @@ import ChatWindow from "../components/ChatWindow";
 import MoodIndicator from "../components/MoodIndicator";
 import SuggestionCard from "../components/SuggestionCard";
 import { sendMessage } from "../services/chatApi";
-import { fetchHistory, fetchChatById, deleteChatById } from "../services/historyApi";
+import {
+  fetchHistory,
+  fetchChatById,
+  deleteChatById,
+  togglePinnedChat,
+} from "../services/historyApi";
 
 const promptChips = [
   "Calm my thoughts",
@@ -33,7 +38,6 @@ export default function ChatPage() {
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [recommendedActivities, setRecommendedActivities] = useState([]);
 
-
   const bottomRef = useRef(null);
   const isEmpty = messages.length === 0;
 
@@ -45,6 +49,13 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  useEffect(() => {
+    const savedChatId = localStorage.getItem("activeChatId");
+    if (savedChatId) {
+      handleOpenHistory(savedChatId);
+    }
+  }, []);
+
   async function loadHistory() {
     try {
       const data = await fetchHistory(username);
@@ -54,22 +65,20 @@ export default function ChatPage() {
     }
   }
 
-  useEffect(() => {
-  const savedChatId = localStorage.getItem("activeChatId");
-  if (savedChatId) {
-    handleOpenHistory(savedChatId);
-  }
-}, []);
-
-
   const filteredHistory = useMemo(() => {
     const query = historySearch.trim().toLowerCase();
-    if (!query) return historyList;
 
-    return historyList.filter((item) => {
-      const title = (item.title || "").toLowerCase();
-      const emotion = (item.emotion || "").toLowerCase();
-      return title.includes(query) || emotion.includes(query);
+    const matched = !query
+      ? historyList
+      : historyList.filter((item) => {
+          const title = (item.title || "").toLowerCase();
+          const emotion = (item.emotion || "").toLowerCase();
+          return title.includes(query) || emotion.includes(query);
+        });
+
+    return [...matched].sort((a, b) => {
+      if (a.pinned === b.pinned) return 0;
+      return a.pinned ? -1 : 1;
     });
   }, [historyList, historySearch]);
 
@@ -116,16 +125,14 @@ export default function ChatPage() {
       setSuggestion(data.suggest_game ? data.game_type : "");
       setRecommendedActivities(data.recommended_activities || []);
 
-
       if (data.suggest_game && data.game_type) {
         localStorage.setItem("suggestedActivity", data.game_type);
       }
 
       if (!currentChatId && data.chat_id) {
-  setCurrentChatId(data.chat_id);
-  localStorage.setItem("activeChatId", data.chat_id);
-}
-
+        setCurrentChatId(data.chat_id);
+        localStorage.setItem("activeChatId", data.chat_id);
+      }
 
       loadHistory();
     } catch (err) {
@@ -145,8 +152,6 @@ export default function ChatPage() {
     setCurrentChatId(null);
     setRecommendedActivities([]);
     localStorage.removeItem("activeChatId");
-
-
   }
 
   async function handleOpenHistory(chatId) {
@@ -162,12 +167,10 @@ export default function ChatPage() {
       setMessages(formattedMessages);
       setCurrentChatId(chat.chat_id);
       localStorage.setItem("activeChatId", chat.chat_id);
-
       setMood(chat.emotion || "Not detected yet");
       setConfidence(chat.confidence || "--");
       setSuggestion(chat.suggest_game ? chat.game_type : "");
       setRecommendedActivities(chat.recommended_activities || []);
-
       setError("");
     } catch (err) {
       console.log("Failed to open chat");
@@ -176,6 +179,15 @@ export default function ChatPage() {
 
   function requestDeleteHistory(chatId) {
     setDeleteTargetId(chatId);
+  }
+
+  async function handleTogglePin(chatId, pinned) {
+    try {
+      await togglePinnedChat(chatId, pinned);
+      await loadHistory();
+    } catch (err) {
+      console.log("Failed to update pin");
+    }
   }
 
   async function confirmDeleteHistory() {
@@ -207,13 +219,86 @@ export default function ChatPage() {
     localStorage.removeItem("username");
     localStorage.removeItem("suggestedActivity");
     localStorage.removeItem("activeChatId");
-
     navigate("/auth");
   }
 
   function cancelLogout() {
     setShowLogoutConfirm(false);
   }
+
+  function renderHistoryCard(item) {
+    const isActive = currentChatId === item.chat_id;
+
+    return (
+      <div
+        key={item.chat_id}
+        className={`group rounded-2xl border px-3 py-3 transition ${
+          isActive ? "bg-[#1e1e1e]" : "bg-transparent hover:bg-[#1a1a1a]"
+        }`}
+        style={{
+          borderColor: isActive ? "#2f6f6d" : "#1f1f1f",
+          boxShadow: isActive ? "0 0 0 1px rgba(124,201,195,0.15)" : "none",
+        }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <button
+            onClick={() => handleOpenHistory(item.chat_id)}
+            className="min-w-0 flex-1 text-left"
+          >
+            <p className="line-clamp-2 text-sm font-medium text-white">
+              {item.title}
+            </p>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="truncate text-xs capitalize text-gray-500">
+                {item.emotion}
+              </p>
+
+              {isActive ? (
+                <span className="rounded-full bg-[#173231] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7cc9c3]">
+                  Open
+                </span>
+              ) : null}
+            </div>
+          </button>
+
+          {item.pinned ? (
+            <button
+              onClick={() => handleTogglePin(item.chat_id, false)}
+              className="text-base opacity-100 transition hover:scale-110"
+              title="Unpin chat"
+              style={{ color: "#f0c674" }}
+            >
+              📌
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-3 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
+          {!item.pinned ? (
+            <button
+              onClick={() => handleTogglePin(item.chat_id, true)}
+              className="rounded-full border border-[#2a2a2a] px-3 py-1 text-xs text-[#f0c674] transition hover:bg-[#1d1d1d]"
+              title="Pin chat"
+            >
+              Pin
+            </button>
+          ) : null}
+
+          <button
+            onClick={() => requestDeleteHistory(item.chat_id)}
+            className="rounded-full border border-[#2a2a2a] px-3 py-1 text-xs text-red-400 transition hover:bg-[#1d1d1d] hover:text-red-300"
+            title="Delete chat"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const pinnedChats = filteredHistory.filter((item) => item.pinned);
+  const recentChats = filteredHistory.filter((item) => !item.pinned);
 
   return (
     <div className="flex h-screen overflow-hidden bg-black text-white">
@@ -275,64 +360,35 @@ export default function ChatPage() {
           ) : null}
         </div>
 
+        {pinnedChats.length > 0 ? (
+          <>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs uppercase tracking-[0.18em] text-[#f0c674]">
+                Pinned
+              </p>
+              <p className="text-xs text-gray-600">{pinnedChats.length}</p>
+            </div>
+
+            <div className="mb-5 space-y-2">
+              {pinnedChats.map(renderHistoryCard)}
+            </div>
+          </>
+        ) : null}
+
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs uppercase tracking-[0.18em] text-gray-500">
             Recents
           </p>
-          <p className="text-xs text-gray-600">{filteredHistory.length}</p>
+          <p className="text-xs text-gray-600">{recentChats.length}</p>
         </div>
 
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-          {filteredHistory.length === 0 ? (
+          {recentChats.length === 0 ? (
             <div className="rounded-2xl border border-[#1f1f1f] bg-[#151515] px-4 py-4 text-sm text-gray-500">
               No chats found.
             </div>
           ) : (
-            filteredHistory.map((item) => {
-              const isActive = currentChatId === item.chat_id;
-
-              return (
-                <div
-                  key={item.chat_id}
-                  className={`group rounded-2xl border px-3 py-3 transition ${
-                    isActive ? "bg-[#1e1e1e]" : "bg-transparent hover:bg-[#1a1a1a]"
-                  }`}
-                  style={{
-                    borderColor: isActive ? "#2f6f6d" : "#1f1f1f",
-                    boxShadow: isActive ? "0 0 0 1px rgba(124,201,195,0.15)" : "none",
-                  }}
-                >
-                  <button
-                    onClick={() => handleOpenHistory(item.chat_id)}
-                    className="w-full text-left"
-                  >
-                    <p className="line-clamp-2 text-sm font-medium text-white">
-                      {item.title}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <p className="truncate text-xs capitalize text-gray-500">
-                        {item.emotion}
-                      </p>
-                      {isActive ? (
-                        <span className="rounded-full bg-[#173231] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7cc9c3]">
-                          Open
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      onClick={() => requestDeleteHistory(item.chat_id)}
-                      className="rounded-full border border-[#2a2a2a] px-3 py-1 text-xs text-red-400 opacity-0 transition group-hover:opacity-100 hover:bg-[#1d1d1d] hover:text-red-300"
-                      title="Delete chat"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+            recentChats.map(renderHistoryCard)
           )}
         </div>
       </aside>
@@ -349,7 +405,6 @@ export default function ChatPage() {
                   {isEmpty ? "New conversation" : currentChatTitle}
                 </h2>
               </div>
-              
             </div>
           </div>
 
@@ -397,11 +452,7 @@ export default function ChatPage() {
         <aside className="hidden w-[320px] border-l border-[#1f1f1f] bg-[#101010] p-5 xl:block">
           <div className="space-y-4">
             <MoodIndicator mood={mood} confidence={confidence} />
-            <SuggestionCard
-  suggestion={suggestion}
-  activities={recommendedActivities}
-/>
-
+            <SuggestionCard suggestion={suggestion} activities={recommendedActivities} />
           </div>
         </aside>
       </main>
