@@ -42,7 +42,7 @@ export default function AuthForm() {
       localStorage.setItem("username", data.username || username);
       navigate("/chat");
     } catch (err) {
-      setError(mode === "login" ? "Login failed." : "Signup failed.");
+      setError(err.message || (mode === "login" ? "Login failed." : "Signup failed."));
     } finally {
       setLoading(false);
     }

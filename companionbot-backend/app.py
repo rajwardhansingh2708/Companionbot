@@ -1,16 +1,19 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from dotenv import load_dotenv
 import os
 import uuid
 import requests
 import pickle
+import logging
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+app.logger.setLevel(logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, "model.pkl")
@@ -23,13 +26,35 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
 
-client = MongoClient(MONGO_URI)
+client = MongoClient(
+    MONGO_URI,
+    serverSelectionTimeoutMS=8000,
+    connectTimeoutMS=8000,
+    socketTimeoutMS=8000
+)
 db = client[MONGO_DB]
 users_collection = db["users"]
 chats_collection = db["chats"]
 
 model = pickle.load(open(MODEL_FILE, "rb"))
 vectorizer = pickle.load(open(VECTORIZER_FILE, "rb"))
+
+
+@app.before_request
+def log_request():
+    app.logger.info("Incoming request: %s %s", request.method, request.path)
+
+
+def ensure_database_connection():
+    try:
+        client.admin.command("ping")
+        return None
+    except PyMongoError as error:
+        app.logger.exception("MongoDB connection failed")
+        return str(error)
+    except Exception as error:
+        app.logger.exception("Unexpected database error")
+        return str(error)
 
 
 def create_chat_title(text):
@@ -217,12 +242,19 @@ def home():
 @app.route("/signup", methods=["POST"])
 def signup():
     try:
+        db_error = ensure_database_connection()
+        if db_error:
+            return jsonify({
+                "error": "Database connection failed",
+                "details": db_error
+            }), 503
+
         data = request.get_json()
         username = data.get("username", "").strip()
         password = data.get("password", "").strip()
         support_focus = data.get("support_focus", "stress")
 
-        print("Signup attempt:", username)
+        app.logger.info("Signup attempt for username=%s", username)
 
         if not username or not password:
             return jsonify({"error": "Required fields missing"}), 400
@@ -238,18 +270,25 @@ def signup():
 
         return jsonify({"message": "Signup successful", "username": username})
     except Exception as e:
-        print("Signup error:", repr(e))
-        return jsonify({"error": "Signup failed on server"}), 500
+        app.logger.exception("Signup error")
+        return jsonify({"error": "Signup failed on server", "details": str(e)}), 500
 
 
 @app.route("/login", methods=["POST"])
 def login():
     try:
+        db_error = ensure_database_connection()
+        if db_error:
+            return jsonify({
+                "error": "Database connection failed",
+                "details": db_error
+            }), 503
+
         data = request.get_json()
         username = data.get("username", "").strip()
         password = data.get("password", "").strip()
 
-        print("Login attempt:", username)
+        app.logger.info("Login attempt for username=%s", username)
 
         user = users_collection.find_one({
             "username": username,
@@ -261,8 +300,8 @@ def login():
 
         return jsonify({"message": "Login successful", "username": username})
     except Exception as e:
-        print("Login error:", repr(e))
-        return jsonify({"error": "Login failed on server"}), 500
+        app.logger.exception("Login error")
+        return jsonify({"error": "Login failed on server", "details": str(e)}), 500
 
 
 
