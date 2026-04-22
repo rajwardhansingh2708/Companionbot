@@ -8,18 +8,22 @@ import uuid
 import requests
 import pickle
 import logging
+import bcrypt
+
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://companionbot-livid.vercel.app"])
 app.logger.setLevel(logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, "model.pkl")
 VECTORIZER_FILE = os.path.join(BASE_DIR, "vectorizer.pkl")
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("MONGO_URI is not set in environment variables")
 MONGO_DB = os.getenv("MONGO_DB", "companionbot")
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
@@ -262,9 +266,11 @@ def signup():
         if users_collection.find_one({"username": username}):
             return jsonify({"error": "User exists"}), 400
 
+        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+
         users_collection.insert_one({
             "username": username,
-            "password": password,
+            "password": hashed_password,
             "support_focus": support_focus
         })
 
@@ -290,18 +296,24 @@ def login():
 
         app.logger.info("Login attempt for username=%s", username)
 
-        user = users_collection.find_one({
-            "username": username,
-            "password": password
-        })
+        # 🔍 Find user by username only
+        user = users_collection.find_one({"username": username})
 
-        if not user:
+        # 🔐 Check hashed password
+        if not user or not bcrypt.checkpw(password.encode("utf-8"), user["password"]):
             return jsonify({"error": "Invalid credentials"}), 401
 
-        return jsonify({"message": "Login successful", "username": username})
+        return jsonify({
+            "message": "Login successful",
+            "username": username
+        })
+
     except Exception as e:
         app.logger.exception("Login error")
-        return jsonify({"error": "Login failed on server", "details": str(e)}), 500
+        return jsonify({
+            "error": "Login failed on server",
+            "details": str(e)
+        }), 500
 
 
 
