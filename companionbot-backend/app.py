@@ -242,6 +242,10 @@ def recommend_activity(emotion):
 def home():
     return jsonify({"message": "CompanionBot backend is running"})
 
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
+
 
 @app.route("/signup", methods=["POST"])
 def signup():
